@@ -42,6 +42,9 @@ class AssetIntrospector:
             if progress_callback:
                 progress_callback("Searching for Arnold texture files...")
             assets.update(self._get_tx_files(progress_callback))
+            if progress_callback:
+                progress_callback("Searching for Arnold procedural files...")
+            assets.update(self._get_arnold_procedural_files(progress_callback))
         elif Scene.renderer() == RendererNames.renderman.value:
             if progress_callback:
                 progress_callback("Searching for Renderman texture files...")
@@ -237,6 +240,45 @@ class AssetIntrospector:
                 progress_callback(f"Completed processing all {total_textures} Arnold texture files")
 
         return arnold_textures_files
+
+    def _get_arnold_procedural_files(self, progress_callback=None) -> set[Path]:
+        """
+        aiStandIn内のASSファイルを再帰的に走査し、
+        参照されているテクスチャファイルとASSファイル自体を収集する。
+
+        Returns:
+            set[Path]: proceduralが参照するテクスチャとASSファイルのパス
+        """
+        from .arnold_procedural import collect_standin_dsos, extract_image_files
+
+        def _report(msg):
+            print(msg)
+            if progress_callback:
+                progress_callback(msg)
+
+        standin_dsos = collect_standin_dsos()
+        if not standin_dsos:
+            return set()
+
+        imagefiles, all_dsos = extract_image_files(standin_dsos, _report)
+
+        result: set[Path] = set()
+        # ASSファイル自体を追加
+        result.update(Path(dso) for dso in all_dsos)
+
+        # テクスチャパスを展開して追加
+        total = len(imagefiles)
+        _report(f"Processing {total} texture files required by Arnold procedurals...")
+        for i, img in enumerate(imagefiles):
+            for expanded_path in self._expand_path(img):
+                result.add(expanded_path)
+            if i > 0 and i % 100 == 0:
+                _report(f"Processed {i}/{total} texture files required by Arnold procedurals...")
+
+        if result:
+            _report(f'Completed processing all {len(result)} Arnold procedural assets')
+
+        return result
 
     def _get_arnold_texture_files(self) -> dict[str, Any]:
         """
